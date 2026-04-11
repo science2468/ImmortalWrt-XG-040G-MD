@@ -8,10 +8,15 @@ on:
   workflow_dispatch:
     inputs:
       log_switch:
-        description: "是否开启详细编译日志 (Debug模式)"
+        description: "Build logs"
         required: false
         default: false
         type: boolean
+      # 新增：自定义提交哈希，留空使用最新commit
+      commit_hash:
+        description: "指定Git提交哈希(留空默认使用最新提交)"
+        required: false
+        type: string
 
 env:
   CONFIG_FILE: "config/xg-040g-md.config"
@@ -46,9 +51,19 @@ jobs:
           python3 -m pip install --upgrade pip setuptools wheel
           python3 -m pip install Unidecode
 
-      - name: Clone OpenWrt source code
+      # ====================== 新增：支持指定Commit / 默认最新Commit ======================
+      - name: Clone OpenWrt source code (指定提交版本)
         run: |
           git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" openwrt
+          cd openwrt
+          # 如果输入了commit哈希，则切换到指定提交
+          if [ -n "${{ inputs.commit_hash }}" ]; then
+            git fetch origin ${{ inputs.commit_hash }}
+            git checkout ${{ inputs.commit_hash }}
+          fi
+          # 获取最终使用的提交信息（用于Release展示）
+          echo "COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "COMMIT_MSG=$(git log -1 --pretty=format:%s)" >> $GITHUB_ENV
 
       - name: Apply XG-040G-MD Patch Files
         run: |
@@ -69,14 +84,13 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # ====================== 修改点1：优化配置文件处理 ======================
+      # ====================== 优化：配置文件处理（备份+上传） ======================
       - name: Copy configuration and defconfig
         run: |
           [ -f "${CONFIG_FILE}" ] && cp -fv "${CONFIG_FILE}" openwrt/.config || echo "警告: 未找到配置文件"
           cd openwrt && make defconfig
-          [ -e .config ] && cp .config defconfig-final.config  # 新增：备份最终生成的配置
+          [ -e .config ] && cp .config defconfig-final.config  # 备份最终配置
 
-      # 新增：上传编译配置文件，方便调试
       - name: Upload build config files
         uses: actions/upload-artifact@v6
         with:
@@ -85,7 +99,6 @@ jobs:
             config/xg-040g-md.config
             openwrt/defconfig-final.config
             openwrt/feeds.conf.default
-      # ====================================================================
 
       - name: Download packages
         working-directory: ./openwrt
@@ -122,8 +135,7 @@ jobs:
           name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: ${{ env.FIRMWARE }}/*
 
-      # ====================== 修改点2：优化Release发布规范 ======================
-      # 新增：生成规范的Release标签和说明文档
+      # ====================== 优化：Release规范 + 新增Commit信息展示 ======================
       - name: Generate release tag and notes
         id: tag
         if: env.UPLOAD_RELEASE == 'true'
@@ -136,9 +148,10 @@ jobs:
           构建时间: $(date +"%Y-%m-%d %H:%M")
           源码仓库: ${{ env.REPO_URL }}
           分支: ${{ env.REPO_BRANCH }}
+          提交哈希: ${{ env.COMMIT_HASH }}
+          提交说明: ${{ env.COMMIT_MSG }}
           EOF
 
-      # 替换原有Release发布，使用规范格式
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         if: env.UPLOAD_RELEASE == 'true'
@@ -148,4 +161,3 @@ jobs:
           artifacts: "${{ env.FIRMWARE }}/*"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # ====================================================================
