@@ -37,17 +37,19 @@ jobs:
           #tar -xzf v25.12.2.tar.gz && mv openwrt-25.12.2 openwrt
           #git clone https://github.com/openwrt/openwrt.git
           git clone -b openwrt-25.12-XG-040G-MD https://github.com/fzs209/immortalwrt.git openwrt
+          ls
           cd openwrt/ && ./scripts/getver.sh
 
       - name: move .config
         run: |
           mv -f config/xg-040g-md.config openwrt/.config
+          ls -l openwrt/.config || echo ".config NOT FOUND"
+          ls -a openwrt/
           cd openwrt/
           #git fetch origin pull/21896/head:pr-21896
           #git checkout pr-21896
-          #./scripts/getver.sh
-          
-          ls -l openwrt/.config || echo ".config NOT FOUND" && make defconfig
+          ./scripts/getver.sh
+          make defconfig
 
       - name: Cache OpenWrt build
         uses: actions/cache@v4
